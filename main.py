@@ -86,6 +86,7 @@ def get_character_image_path(character_name):
         print(f"获取图片路径失败: {e}")
     return None
 
+
 class DraggableListWidget(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -97,45 +98,71 @@ class DraggableListWidget(QListWidget):
         self.parent_widget = parent
 
     def startDrag(self, supportedActions):
+        is_filtered = False
         if self.parent_widget:
-            if (self.parent_widget.filter_type_combo.currentText() != "所有类型" or
-                    self.parent_widget.filter_rank_combo.currentText() != "所有爆裂"):
-                return
+            is_filtered = (self.parent_widget.filter_type_combo.currentText() != "所有类型" or
+                           self.parent_widget.filter_rank_combo.currentText() != "所有爆裂")
+
         drag = QDrag(self)
         mimeData = QMimeData()
         if self.currentItem():
             real_name = self.currentItem().data(Qt.UserRole)
             mimeData.setText(real_name)
-            mimeData.setData("application/x-character-index", str(self.currentRow()).encode())
+            if not is_filtered:
+                mimeData.setData("application/x-character-index", str(self.currentRow()).encode())
         drag.setMimeData(mimeData)
         drag.exec_(Qt.MoveAction | Qt.CopyAction)
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasText() or event.mimeData().hasFormat("application/x-character-index"):
+        if event.mimeData().hasFormat("application/x-character-index"):
+            if self.parent_widget:
+                is_filtered = (self.parent_widget.filter_type_combo.currentText() != "所有类型" or
+                               self.parent_widget.filter_rank_combo.currentText() != "所有爆裂")
+                if is_filtered:
+                    event.ignore()
+                    return
             event.acceptProposedAction()
+        elif event.mimeData().hasText():
+            event.ignore()  # 拖到 DropLabel 由外部处理
         else:
             event.ignore()
 
     def dragMoveEvent(self, event):
-        if event.mimeData().hasText() or event.mimeData().hasFormat("application/x-character-index"):
+        if event.mimeData().hasFormat("application/x-character-index"):
+            if self.parent_widget:
+                is_filtered = (self.parent_widget.filter_type_combo.currentText() != "所有类型" or
+                               self.parent_widget.filter_rank_combo.currentText() != "所有爆裂")
+                if is_filtered:
+                    event.ignore()
+                    return
             event.acceptProposedAction()
+        elif event.mimeData().hasText():
+            event.ignore()
         else:
             event.ignore()
 
     def dropEvent(self, event):
         if event.mimeData().hasFormat("application/x-character-index"):
+            is_filtered = False
+            if self.parent_widget:
+                is_filtered = (self.parent_widget.filter_type_combo.currentText() != "所有类型" or
+                               self.parent_widget.filter_rank_combo.currentText() != "所有爆裂")
+            if is_filtered:
+                event.ignore()
+                return
+
             source_index = int(event.mimeData().data("application/x-character-index").data().decode())
             drop_row = self.indexAt(event.pos()).row()
             if drop_row == -1:
                 drop_row = self.count()
             if source_index != drop_row and source_index != drop_row - 1:
+                item = self.takeItem(source_index)
+                self.insertItem(drop_row, item)
+                self.setCurrentItem(item)
                 if self.parent_widget:
-                    item = self.takeItem(source_index)
-                    self.insertItem(drop_row, item)
-                    self.setCurrentItem(item)
                     self.parent_widget.update_character_order()
             event.acceptProposedAction()
-        elif event.mimeData().hasText():
+        else:
             event.ignore()
 
 class DropLabel(QLabel):
@@ -335,7 +362,7 @@ class EditCharacterDialog(QDialog):
 class EditMatchDialog(QDialog):
     def __init__(self, match_data, characters_data, data_index, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("详情")
+        self.setWindowTitle("编辑战绩")
         self.match_data = match_data
         self.characters_data = characters_data
         self.data_index = data_index
@@ -695,71 +722,175 @@ class LatestMatchPreview(QWidget):
 class MatchViewer(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("战绩查看")
-        self.setFixedSize(560, 600)
+        self.setWindowTitle("查看战绩")
+        self.setMinimumSize(1000, 800)
         self.matches_data = []
         self.characters_data = []
         self.init_ui()
         self.load_matches()
 
     def init_ui(self):
-        main_layout = QVBoxLayout(self)
+        main_layout = QHBoxLayout()
+        left_panel = QWidget()
+        left_layout = QVBoxLayout()
 
+        # 初始化 search_group
         search_group = QGroupBox("搜索战绩")
-        search_layout = QHBoxLayout()
-
+        search_layout = QVBoxLayout()
+        search_input_layout = QHBoxLayout()
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("输入角色名/昵称,a:角色(进攻方),d:角色(防守方)，支持AND/OR...")
-        self.search_input.setStyleSheet("""
-            QLineEdit {
-                border: 1px solid #aaa;
-                border-radius: 5px;
-                padding: 5px;
-            }
-        """)
-        search_layout.addWidget(self.search_input)
-
-        self.search_btn = QPushButton("搜索")
-        self.search_btn.setStyleSheet(BUTTON_STYLE["primary"])
-        self.search_btn.clicked.connect(self.search_matches)
-        search_layout.addWidget(self.search_btn)
-
-        self.clear_search_btn = QPushButton("显示所有")
-        self.clear_search_btn.setStyleSheet(BUTTON_STYLE["secondary"])
-        self.clear_search_btn.clicked.connect(self.clear_search_and_display_all)
-        search_layout.addWidget(self.clear_search_btn)
-
+        self.search_input.setPlaceholderText("输入搜索内容（例：a:角色1 AND d:角色2 OR 角色3）")
+        search_input_layout.addWidget(self.search_input)
+        search_btn = QPushButton("搜索")
+        search_btn.setStyleSheet(BUTTON_STYLE["primary"])
+        search_btn.clicked.connect(self.search_matches)
+        search_input_layout.addWidget(search_btn)
+        clear_search_btn = QPushButton("清除")
+        clear_search_btn.setStyleSheet(BUTTON_STYLE["secondary"])
+        clear_search_btn.clicked.connect(self.clear_search_and_display_all)
+        search_input_layout.addWidget(clear_search_btn)
+        search_layout.addLayout(search_input_layout)
         search_group.setLayout(search_layout)
-        main_layout.addWidget(search_group)
+        left_layout.addWidget(search_group)
 
+        # 初始化 drag_search_group
+        drag_search_group = QGroupBox("拖放搜索")
+        drag_search_layout = QVBoxLayout()
+        team_b_search_layout = QHBoxLayout()
+        team_b_search_layout.addWidget(QLabel("防守方："))
+        self.team_b_search_labels = []
+        for _ in range(5):
+            label = DropLabel(parent=self)
+            self.team_b_search_labels.append(label)
+            team_b_search_layout.addWidget(label)
+        drag_search_layout.addLayout(team_b_search_layout)
+        team_a_search_layout = QHBoxLayout()
+        team_a_search_layout.addWidget(QLabel("进攻方："))
+        self.team_a_search_labels = []
+        for _ in range(5):
+            label = DropLabel(parent=self)
+            self.team_a_search_labels.append(label)
+            team_a_search_layout.addWidget(label)
+        drag_search_layout.addLayout(team_a_search_layout)
+        drag_search_btn_layout = QHBoxLayout()
+        search_drag_btn = QPushButton("搜索")
+        search_drag_btn.setStyleSheet(BUTTON_STYLE["primary"])
+        search_drag_btn.clicked.connect(self.search_by_drag)
+        clear_drag_btn = QPushButton("清除")
+        clear_drag_btn.setStyleSheet(BUTTON_STYLE["secondary"])
+        clear_drag_btn.clicked.connect(self.clear_drag_search)
+        drag_search_btn_layout.addWidget(search_drag_btn)
+        drag_search_btn_layout.addWidget(clear_drag_btn)
+        drag_search_layout.addLayout(drag_search_btn_layout)
+        drag_search_group.setLayout(drag_search_layout)
+        left_layout.addWidget(drag_search_group)
+
+        # 初始化 match_list_widget
         self.match_list_widget = QListWidget()
         self.match_list_widget.setSelectionMode(QListWidget.ExtendedSelection)
-        main_layout.addWidget(self.match_list_widget)
+        left_layout.addWidget(self.match_list_widget)
 
+        # 初始化按钮
         button_layout = QHBoxLayout()
-        self.select_all_btn = QPushButton("全选")
-        self.select_all_btn.setStyleSheet(BUTTON_STYLE["primary"])
-        self.select_all_btn.clicked.connect(self.select_all_matches)
-        self.edit_match_btn = QPushButton("详情")
-        self.edit_match_btn.setStyleSheet(BUTTON_STYLE["primary"])
-        self.edit_match_btn.clicked.connect(self.edit_match)
-        self.delete_match_btn = QPushButton("删除")
-        self.delete_match_btn.setStyleSheet(BUTTON_STYLE["secondary"])
-        self.delete_match_btn.clicked.connect(self.delete_match)
-        self.export_btn = QPushButton("导出战绩")
-        self.export_btn.setStyleSheet(BUTTON_STYLE["primary"])
-        self.export_btn.setToolTip("Ctrl+点击或Shift+点击选择多条战绩进行导出")
-        self.export_btn.clicked.connect(self.export_matches)
-        self.import_btn = QPushButton("导入战绩")
-        self.import_btn.setStyleSheet(BUTTON_STYLE["primary"])
-        self.import_btn.setToolTip("可导入包含多条战绩的JSON文件")
-        self.import_btn.clicked.connect(self.import_matches)
-        button_layout.addWidget(self.select_all_btn)
-        button_layout.addWidget(self.edit_match_btn)
-        button_layout.addWidget(self.delete_match_btn)
-        button_layout.addWidget(self.export_btn)
-        button_layout.addWidget(self.import_btn)
-        main_layout.addLayout(button_layout)
+        select_all_btn = QPushButton("全选")
+        select_all_btn.setStyleSheet(BUTTON_STYLE["primary"])
+        select_all_btn.clicked.connect(self.select_all_matches)
+        edit_btn = QPushButton("编辑")
+        edit_btn.setStyleSheet(BUTTON_STYLE["primary"])
+        edit_btn.clicked.connect(self.edit_match)
+        delete_btn = QPushButton("删除")
+        delete_btn.setStyleSheet(BUTTON_STYLE["secondary"])
+        delete_btn.clicked.connect(self.delete_match)
+        export_btn = QPushButton("导出")
+        export_btn.setStyleSheet(BUTTON_STYLE["primary"])
+        export_btn.clicked.connect(self.export_matches)
+        import_btn = QPushButton("导入")
+        import_btn.setStyleSheet(BUTTON_STYLE["primary"])
+        import_btn.clicked.connect(self.import_matches)
+        button_layout.addWidget(select_all_btn)
+        button_layout.addWidget(edit_btn)
+        button_layout.addWidget(delete_btn)
+        button_layout.addWidget(export_btn)
+        button_layout.addWidget(import_btn)
+        left_layout.addLayout(button_layout)
+        left_panel.setLayout(left_layout)
+
+        right_panel = QWidget()
+        right_layout = QVBoxLayout()
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("筛选类型："))
+        self.filter_type_combo = QComboBox()
+        self.filter_type_combo.addItems(["所有类型", "火力型", "防御型", "辅助型"])
+        filter_layout.addWidget(self.filter_type_combo)
+        filter_layout.addWidget(QLabel("筛选爆裂："))
+        self.filter_rank_combo = QComboBox()
+        self.filter_rank_combo.addItems(["所有爆裂", "I", "II", "III", "Λ"])
+        filter_layout.addWidget(self.filter_rank_combo)
+        right_layout.addLayout(filter_layout)
+        char_list_group = QGroupBox("角色列表")
+        char_list_layout = QVBoxLayout()
+        self.list_widget = DraggableListWidget(parent=self)
+        self.list_widget.setIconSize(QSize(60, 60))
+        self.list_widget.setViewMode(QListView.IconMode)
+        self.list_widget.setResizeMode(QListWidget.Adjust)
+        self.list_widget.setSelectionMode(QListWidget.ExtendedSelection)
+        char_list_layout.addWidget(self.list_widget)
+        char_list_group.setLayout(char_list_layout)
+        right_layout.addWidget(char_list_group)
+        right_panel.setLayout(right_layout)
+
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(left_panel)
+        splitter.addWidget(right_panel)
+        splitter.setSizes([600, 400])
+        main_layout.addWidget(splitter)
+        self.setLayout(main_layout)
+
+        self.filter_type_combo.currentTextChanged.connect(self.filter_characters)
+        self.filter_rank_combo.currentTextChanged.connect(self.filter_characters)
+
+    def filter_characters(self):
+        self.list_widget.clear()
+        QApplication.processEvents()
+        selected_type = self.filter_type_combo.currentText()
+        selected_rank = self.filter_rank_combo.currentText()
+        is_filtered = (selected_type != "所有类型" or selected_rank != "所有爆裂")
+        icon_cache = {}
+        filtered_chars = []
+        for char in self.characters_data:
+            char_type = char.get("type", "")
+            char_rank = char.get("rank", "")
+            type_match = (selected_type == "所有类型" or char_type == selected_type)
+            rank_match = (selected_rank == "所有爆裂" or char_rank == selected_rank)
+            if type_match and rank_match:
+                filtered_chars.append(char)
+        for char in filtered_chars:
+            name = char["name"]
+            item = QListWidgetItem()
+            img_path = os.path.join(IMG_DIR, char["image"])
+            if img_path not in icon_cache:
+                if os.path.exists(img_path):
+                    icon_cache[img_path] = QIcon(img_path)
+                else:
+                    icon_cache[img_path] = QIcon()
+            item.setIcon(icon_cache[img_path])
+            item.setData(Qt.UserRole, name)
+            font_metrics = self.list_widget.fontMetrics()
+            elided_name = font_metrics.elidedText(name, Qt.ElideRight, 60)
+            item.setText(elided_name)
+            tooltip_text = f"名称: {char.get('name', '')}\n"
+            tooltip_text += f"昵称: {char.get('nickname', '') or 'none'}\n"
+            tooltip_text += f"类型: {char.get('type', '') or '未设置'}\n"
+            tooltip_text += f"等级: {char.get('rank', '') or '未设置'}\n"
+            tooltip_text += f"2RL: {char.get('2RL', 0)}\n"
+            tooltip_text += f"2.5RL: {char.get('2.5RL', 0)}\n"
+            tooltip_text += f"3RL: {char.get('3RL', 0)}\n"
+            tooltip_text += f"3.5RL: {char.get('3.5RL', 0)}\n"
+            tooltip_text += f"4RL: {char.get('4RL', 0)}"
+            item.setToolTip(tooltip_text)
+            item.setTextAlignment(Qt.AlignHCenter)
+            item.setSizeHint(QSize(60, 80))
+            self.list_widget.addItem(item)
 
     def select_all_matches(self):
         for i in range(self.match_list_widget.count()):
@@ -778,6 +909,7 @@ class MatchViewer(QDialog):
         except json.JSONDecodeError:
             self.characters_data = []
         self.display_matches()
+        self.filter_characters()  # 加载角色列表
 
     def display_matches(self, filtered_matches=None):
         self.match_list_widget.clear()
@@ -792,10 +924,10 @@ class MatchViewer(QDialog):
     def edit_match(self):
         selected_items = self.match_list_widget.selectedItems()
         if not selected_items:
-            QMessageBox.information(self, "提示", "请先选择一条战绩记录进行查看。")
+            QMessageBox.information(self, "提示", "请先选择一条战绩记录进行编辑。")
             return
         if len(selected_items) > 1:
-            QMessageBox.information(self, "提示", "一次只能查看一条战绩记录。")
+            QMessageBox.information(self, "提示", "一次只能编辑一条战绩记录。")
             return
 
         item = selected_items[0]
@@ -830,26 +962,20 @@ class MatchViewer(QDialog):
             return
 
         found_matches = []
-
-        re_and = QRegularExpression(r"(.+)\s+AND\s+(.+)", QRegularExpression.CaseInsensitiveOption)
-        re_or = QRegularExpression(r"(.+)\s+OR\s+(.+)", QRegularExpression.CaseInsensitiveOption)
-
-        nickname_to_name = {}
-        for char in self.characters_data:
-            if char.get("nickname"):
-                nickname_to_name[char["nickname"].lower()] = char["name"]
+        nickname_to_name = {char.get("nickname", "").lower(): char["name"] for char in self.characters_data if
+                            char.get("nickname")}
 
         def resolve_term(term):
             term = term.strip()
             if term.startswith("a:"):
-                return ("team_a", nickname_to_name.get(term[2:], term[2:]))
+                return ("team_a", nickname_to_name.get(term[2:].lower(), term[2:]))
             elif term.startswith("d:"):
-                return ("team_b", nickname_to_name.get(term[2:]))
+                return ("team_b", nickname_to_name.get(term[2:].lower(), term[2:]))
             else:
-                name = nickname_to_name.get(term, term)
-                return ("any", name)
+                return ("any", nickname_to_name.get(term.lower(), term))
 
         def match_condition(team, name, match):
+            name = name.lower()
             team_a = [m.lower() for m in match.get("team_a", [])]
             team_b = [m.lower() for m in match.get("team_b", [])]
             if team == "team_a":
@@ -860,35 +986,82 @@ class MatchViewer(QDialog):
                 return name in team_a or name in team_b
             return False
 
-        match_and = re_and.match(search_query)
-        match_or = re_or.match(search_query)
+        # Split query into AND/OR parts
+        terms = []
+        current_term = ""
+        i = 0
+        while i < len(search_query):
+            if search_query[i:i + 3].lower() == "and":
+                if current_term:
+                    terms.append(("AND", current_term.strip()))
+                    current_term = ""
+                i += 3
+                continue
+            elif search_query[i:i + 2].lower() == "or":
+                if current_term:
+                    terms.append(("OR", current_term.strip()))
+                    current_term = ""
+                i += 2
+                continue
+            current_term += search_query[i]
+            i += 1
+        if current_term:
+            terms.append(("AND", current_term.strip()))  # Default to AND for last term
 
-        if match_and.hasMatch():
-            team1, name1 = resolve_term(match_and.captured(1).lower())
-            team2, name2 = resolve_term(match_and.captured(2).lower())
-            for match in self.matches_data:
-                if match_condition(team1, name1, match) and match_condition(team2, name2, match):
-                    found_matches.append(match)
-        elif match_or.hasMatch():
-            team1, name1 = resolve_term(match_or.captured(1).lower())
-            team2, name2 = resolve_term(match_or.captured(2).lower())
-            for match in self.matches_data:
-                if match_condition(team1, name1, match) or match_condition(team2, name2, match):
-                    found_matches.append(match)
-        else:
-            team, name = resolve_term(search_query)
-            for match in self.matches_data:
-                if match_condition(team, name, match):
-                    found_matches.append(match)
+        for match in self.matches_data:
+            and_conditions_met = True
+            or_conditions_met = False
+
+            for i, (op, term) in enumerate(terms):
+                team, name = resolve_term(term)
+                condition_met = match_condition(team, name, match)
+
+                if op == "AND":
+                    and_conditions_met = and_conditions_met and condition_met
+                elif op == "OR":
+                    or_conditions_met = or_conditions_met or condition_met
+
+            # Match is valid if all AND conditions are met OR any OR condition is met
+            if and_conditions_met or or_conditions_met:
+                found_matches.append(match)
 
         if not found_matches:
             QMessageBox.information(self, "搜索结果", f"没有找到匹配 '{search_query}' 的战绩记录。")
         else:
             self.display_matches(found_matches)
 
+    def search_by_drag(self):
+        try:
+            team_a = [label.character_name for label in self.team_a_search_labels if label.character_name]
+            team_b = [label.character_name for label in self.team_b_search_labels if label.character_name]
+            if not team_a and not team_b:
+                QMessageBox.information(self, "提示", "请至少拖放一个角色到进攻方或防守方")
+                return
+            query_parts = []
+            for char in team_a:
+                query_parts.append(f"a:{char}")
+            for char in team_b:
+                query_parts.append(f"d:{char}")
+            search_query = " AND ".join(query_parts)
+            self.search_input.setText(search_query)
+            self.search_matches()
+        except Exception as e:
+            print(f"搜索错误: {e}")
+            QMessageBox.critical(self, "错误", f"搜索失败: {e}")
+
     def clear_search_and_display_all(self):
         self.search_input.clear()
         self.display_matches()
+
+    def clear_drag_search(self):
+        try:
+            for label in self.team_a_search_labels + self.team_b_search_labels:
+                label.clear_label()
+            self.search_input.clear()
+            self.display_matches()
+        except Exception as e:
+            print(f"清除拖放错误: {e}")
+            QMessageBox.critical(self, "错误", f"清除拖放失败: {e}")
 
     def delete_match(self):
         selected_items = self.match_list_widget.selectedItems()
@@ -999,6 +1172,25 @@ class MatchViewer(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "导入失败", f"保存战绩失败: {e}")
 
+    def update_character_order(self):
+        new_order = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            name = item.data(Qt.UserRole)
+            for char in self.characters_data:
+                if char["name"] == name:
+                    new_order.append(char)
+                    break
+        self.characters_data = new_order
+        try:
+            with open(CHAR_FILE, "w", encoding="utf-8") as f:
+                json.dump(self.characters_data, f, indent=2, ensure_ascii=False)
+            # Notify parent (CharacterManager) to reload characters
+            if self.parent() and isinstance(self.parent(), CharacterManager):
+                self.parent().load_characters()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存角色顺序失败: {e}")
+
 class CharacterManager(QWidget):
     def __init__(self):
         super().__init__()
@@ -1006,7 +1198,7 @@ class CharacterManager(QWidget):
         self.characters_data = []
         self.init_ui()
         self.load_characters()
-
+        self.update_match()  # 添加这行
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
         else:
@@ -1019,14 +1211,12 @@ class CharacterManager(QWidget):
 
     def init_ui(self):
         self.main_layout = QHBoxLayout()
-
         left_panel = QWidget()
         left_layout = QVBoxLayout()
-        left_panel.setLayout(left_layout)
 
+        # 初始化 match_add_group
         match_add_group = QGroupBox("添加战绩")
         match_add_layout = QVBoxLayout()
-
         team_b_layout = QHBoxLayout()
         team_b_layout.addWidget(QLabel("防守方："))
         self.team_b_labels = []
@@ -1035,7 +1225,6 @@ class CharacterManager(QWidget):
             self.team_b_labels.append(label)
             team_b_layout.addWidget(label)
         match_add_layout.addLayout(team_b_layout)
-
         team_a_layout = QHBoxLayout()
         team_a_layout.addWidget(QLabel("进攻方："))
         self.team_a_labels = []
@@ -1044,8 +1233,6 @@ class CharacterManager(QWidget):
             self.team_a_labels.append(label)
             team_a_layout.addWidget(label)
         match_add_layout.addLayout(team_a_layout)
-
-        # Add team stats display
         self.stats_group = QGroupBox("队伍充能")
         stats_layout = QVBoxLayout()
         self.team_b_stats = QLabel("防守方: 2RL: 0 | 2.5RL: 0 | 3RL: 0 | 3.5RL: 0 | 4RL: 0")
@@ -1054,46 +1241,40 @@ class CharacterManager(QWidget):
         stats_layout.addWidget(self.team_a_stats)
         self.stats_group.setLayout(stats_layout)
         match_add_layout.addWidget(self.stats_group)
-
         result_layout = QHBoxLayout()
         result_layout.addWidget(QLabel("结果："))
         self.result_combo = QComboBox()
         self.result_combo.addItems(["胜", "败"])
         result_layout.addWidget(self.result_combo)
         match_add_layout.addLayout(result_layout)
-
         match_add_layout.addWidget(QLabel("备注："))
         self.notes_input = QTextEdit()
         self.notes_input.setMinimumHeight(60)
         match_add_layout.addWidget(self.notes_input)
-
         match_btn_layout = QHBoxLayout()
-        self.add_match_btn = QPushButton("添加战绩")
+        self.add_match_btn = QPushButton("添加战绩")  # 确保定义
         self.add_match_btn.setStyleSheet(BUTTON_STYLE["primary"])
         self.clear_match_input_btn = QPushButton("清除输入")
         self.clear_match_input_btn.setStyleSheet(BUTTON_STYLE["secondary"])
         match_btn_layout.addWidget(self.add_match_btn)
         match_btn_layout.addWidget(self.clear_match_input_btn)
         match_add_layout.addLayout(match_btn_layout)
-
         match_add_group.setLayout(match_add_layout)
         left_layout.addWidget(match_add_group)
 
+        # 初始化 latest_match_preview 和 view_matches_btn
         self.latest_match_preview = LatestMatchPreview()
         left_layout.addWidget(self.latest_match_preview)
-
         self.view_matches_btn = QPushButton("查看战绩")
         self.view_matches_btn.setStyleSheet(BUTTON_STYLE["primary"])
         left_layout.addWidget(self.view_matches_btn)
+        left_panel.setLayout(left_layout)
 
         right_panel = QWidget()
         right_layout = QVBoxLayout()
-        right_panel.setLayout(right_layout)
 
         char_add_group = QGroupBox("添加角色")
         char_add_layout = QVBoxLayout()
-
-        # Use QGridLayout for structured input arrangement
         char_input_layout = QGridLayout()
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("名称")
@@ -1122,8 +1303,6 @@ class CharacterManager(QWidget):
         self.preview_label = QLabel()
         self.preview_label.setFixedSize(60, 60)
         self.preview_label.setStyleSheet("border: none;")
-
-        # Arrange inputs in two rows
         char_input_layout.addWidget(self.name_input, 0, 0)
         char_input_layout.addWidget(self.nickname_input, 0, 1)
         char_input_layout.addWidget(self.type_combo, 0, 2)
@@ -1137,7 +1316,6 @@ class CharacterManager(QWidget):
         char_input_layout.addWidget(self.rl35_input, 1, 3)
         char_input_layout.addWidget(self.rl4_input, 1, 4)
         char_input_layout.addWidget(self.add_char_btn, 1, 5)
-
         char_add_layout.addLayout(char_input_layout)
         char_add_group.setLayout(char_add_layout)
         right_layout.addWidget(char_add_group)
@@ -1165,7 +1343,7 @@ class CharacterManager(QWidget):
         char_btn_layout = QHBoxLayout()
         self.select_all_char_btn = QPushButton("全选")
         self.select_all_char_btn.setStyleSheet(BUTTON_STYLE["primary"])
-        self.select_all_char_btn.clicked.connect(self.select_all_characters)
+        self.select_all_char_btn.clicked.connect(self.select_all_chars)
         self.edit_char_btn = QPushButton("编辑角色")
         self.edit_char_btn.setStyleSheet(BUTTON_STYLE["primary"])
         self.edit_char_btn.clicked.connect(self.edit_character)
@@ -1187,6 +1365,7 @@ class CharacterManager(QWidget):
         char_list_group.setLayout(char_list_layout)
         right_layout.addWidget(char_list_group)
 
+        right_panel.setLayout(right_layout)
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(left_panel)
         splitter.addWidget(right_panel)
@@ -1195,6 +1374,7 @@ class CharacterManager(QWidget):
 
         self.selected_img_path = None
 
+        # 信号连接
         self.select_img_btn.clicked.connect(self.select_image)
         self.add_char_btn.clicked.connect(self.add_character)
         self.clear_char_input_btn.clicked.connect(self.clear_character_input)
@@ -1204,9 +1384,7 @@ class CharacterManager(QWidget):
         self.clear_match_input_btn.clicked.connect(self.clear_match_input)
         self.view_matches_btn.clicked.connect(self.show_match_viewer)
 
-        self.update_match()
-
-    def select_all_characters(self):
+    def select_all_chars(self):
         if self.list_widget.count() > 1000:
             reply = QMessageBox.question(
                 self, "警告",
@@ -1215,15 +1393,12 @@ class CharacterManager(QWidget):
             )
             if reply == QMessageBox.No:
                 return
-
         self.list_widget.blockSignals(True)
         try:
             for i in range(self.list_widget.count()):
                 item = self.list_widget.item(i)
                 if item is not None:
                     item.setSelected(True)
-                else:
-                    continue
         finally:
             self.list_widget.blockSignals(False)
 
@@ -1244,66 +1419,69 @@ class CharacterManager(QWidget):
         if rank == "爆裂":
             rank = ""
 
-        try:
-            rl2 = float(self.rl2_input.text().strip())
-            rl25 = float(self.rl25_input.text().strip())
-            rl3 = float(self.rl3_input.text().strip())
-            rl35 = float(self.rl35_input.text().strip())
-            rl4 = float(self.rl4_input.text().strip())
-        except ValueError as e:
-            QMessageBox.critical(self, "错误", f"请输入有效数字值: {e}")
-            return
+        # 处理 RL 值，空输入默认为 0.0
+        rl_values = {}
+        for rl_key, rl_input in [
+            ("2RL", self.rl2_input),
+            ("2.5RL", self.rl25_input),
+            ("3RL", self.rl3_input),
+            ("3.5RL", self.rl35_input),
+            ("4RL", self.rl4_input)
+        ]:
+            text = rl_input.text().strip()
+            try:
+                rl_values[rl_key] = float(text) if text else 0.0
+            except ValueError:
+                QMessageBox.warning(self, "错误", f"请输入有效的 {rl_key} 值（例如 0 或 100.0）")
+                return
 
         if not name:
-            QMessageBox.critical(self, "提示", "请输入角色名称")
+            QMessageBox.warning(self, "提示", "请输入角色名称")
             return
-
-        if not self.selected_img_path:
-            QMessageBox.critical(self, "提示", "请先选择图片")
-            return
-
         try:
             with open(CHAR_FILE, "r", encoding="utf-8") as f:
                 characters = json.load(f)
-                for char in characters:
-                    if char["name"] == name:
-                        QMessageBox.critical(self, "重复", f"角色 [{name}] 已存在")
-                        return
+            for char in characters:
+                if char["name"] == name:
+                    QMessageBox.warning(self, "重复", f"角色 [{name}] 已存在")
+                    return
         except Exception as e:
             QMessageBox.critical(self, "错误", f"读取角色数据失败: {e}")
             return
-
+        if not self.selected_img_path:
+            QMessageBox.warning(self, "提示", "请选择角色图片")
+            return
         ext = os.path.splitext(self.selected_img_path)[1]
         img_filename = f"{name}{ext}"
-        img_path = os.path.join(IMG_DIR, img_filename)
-
+        img_dest_path = os.path.join(IMG_DIR, img_filename)
         try:
-            with open(self.selected_img_path, "rb") as src, open(img_path, "wb") as dst:
+            with open(self.selected_img_path, "rb") as src, open(img_dest_path, "wb") as dst:
                 dst.write(src.read())
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存图片失败: {e}")
             return
-
-        with open(CHAR_FILE, "r+", encoding="utf-8") as f:
-            characters = json.load(f)
-            characters.append({
-                "name": name,
-                "nickname": nickname,
-                "image": img_filename,
-                "type": char_type,
-                "rank": rank,
-                "2RL": rl2,
-                "2.5RL": rl25,
-                "3RL": rl3,
-                "3.5RL": rl35,
-                "4RL": rl4
-            })
-            f.seek(0)
-            json.dump(characters, f, indent=2, ensure_ascii=False)
-            f.truncate()
-
+        new_char = {
+            "name": name,
+            "nickname": nickname,
+            "type": char_type,
+            "rank": rank,
+            "image": img_filename,
+            "2RL": rl_values["2RL"],
+            "2.5RL": rl_values["2.5RL"],
+            "3RL": rl_values["3RL"],
+            "3.5RL": rl_values["3.5RL"],
+            "4RL": rl_values["4RL"]
+        }
+        characters.append(new_char)
+        try:
+            with open(CHAR_FILE, "w", encoding="utf-8") as f:
+                json.dump(characters, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存角色数据失败: {e}")
+            return
         self.clear_character_input()
         self.load_characters()
+        QMessageBox.information(self, "成功", f"角色 [{name}] 添加成功")
 
     def clear_character_input(self):
         self.name_input.clear()
@@ -1363,20 +1541,17 @@ class CharacterManager(QWidget):
         self.list_widget.clear()
         selected_type = self.filter_type_combo.currentText()
         selected_rank = self.filter_rank_combo.currentText()
-
+        is_filtered = (selected_type != "所有类型" or selected_rank != "所有爆裂")
         icon_cache = {}
         filtered_chars = []
         for char in self.characters_data:
             name = char["name"]
             char_type = char.get("type", "")
             char_rank = char.get("rank", "")
-
             type_match = (selected_type == "所有类型" or char_type == selected_type)
             rank_match = (selected_rank == "所有爆裂" or char_rank == selected_rank)
-
             if type_match and rank_match:
                 filtered_chars.append(char)
-
         for char in filtered_chars:
             name = char["name"]
             item = QListWidgetItem()
@@ -1773,15 +1948,22 @@ class CharacterManager(QWidget):
         try:
             with open(MATCH_FILE, "r", encoding="utf-8") as f:
                 matches = json.load(f)
+            print(f"Loaded {len(matches)} matches from {MATCH_FILE}")  # 调试信息
             self.latest_match_preview.update_preview(matches)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error in {MATCH_FILE}: {e}")  # 调试信息
+            self.latest_match_preview.update_preview([])
+        except FileNotFoundError:
+            print(f"{MATCH_FILE} not found")  # 调试信息
+            self.latest_match_preview.update_preview([])
+        except Exception as e:
+            print(f"Error loading matches: {e}")  # 调试信息
             self.latest_match_preview.update_preview([])
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    QToolTip.setFont(QFont("Microsoft YaHei", 10))
-    app.setStyleSheet("QToolTip { font-family: 'Microsoft YaHei'; font-size: 12px; }")
-
+    QToolTip.setFont(QFont("Arial", 8))
+    app.setStyleSheet("QToolTip { font-family: 'Arial'; font-size: 10px; }")
     window = CharacterManager()
     window.show()
     sys.exit(app.exec_())
