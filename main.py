@@ -14,13 +14,11 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QPixmap, QIcon, QDrag, QFont
 from PyQt5.QtCore import QSize, Qt, QMimeData, QRegularExpression, QTimer, QPoint
 
-# 定义数据目录和文件路径
 DATA_DIR = "data"
 IMG_DIR = os.path.join(DATA_DIR, "portraits")
 CHAR_FILE = os.path.join(DATA_DIR, "characters.json")
 MATCH_FILE = os.path.join(DATA_DIR, "matches.json")
 
-# 创建数据目录和初始化空JSON文件
 os.makedirs(IMG_DIR, exist_ok=True)
 if not os.path.exists(CHAR_FILE):
     with open(CHAR_FILE, "w", encoding="utf-8") as f:
@@ -29,7 +27,6 @@ if not os.path.exists(MATCH_FILE):
     with open(MATCH_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, indent=2, ensure_ascii=False)
 
-# 定义按钮样式
 BUTTON_STYLE = {
     "primary": """
         QPushButton {
@@ -123,7 +120,7 @@ class DraggableListWidget(QListWidget):
                     return
             event.acceptProposedAction()
         elif event.mimeData().hasText():
-            event.ignore()  # 拖到 DropLabel 由外部处理
+            event.ignore()
         else:
             event.ignore()
 
@@ -407,7 +404,6 @@ class EditMatchDialog(QDialog):
         team_a_group.setLayout(team_a_layout)
         layout.addWidget(team_a_group)
 
-        # Add team stats display
         self.stats_group = QGroupBox("队伍充能")
         stats_layout = QVBoxLayout()
         self.team_b_stats = QLabel("防守方: 2RL: 0 | 2.5RL: 0 | 3RL: 0 | 3.5RL: 0 | 4RL: 0")
@@ -465,27 +461,23 @@ class EditMatchDialog(QDialog):
         team_a_stats = calculate_team_stats(self.team_a_labels)
         team_b_stats = calculate_team_stats(self.team_b_labels)
 
-        # Find the first attribute >= 100 for team A
         first_a_highlight = None
         for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]:
             if team_a_stats[attr] >= 100:
                 first_a_highlight = attr
                 break
 
-        # Find the first attribute >= 100 for team B
         first_b_highlight = None
         for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]:
             if team_b_stats[attr] >= 100:
                 first_b_highlight = attr
                 break
 
-        # Format team A stats
         team_a_text = "进攻方: " + " | ".join(
             format_stat(team_a_stats[attr], attr, attr == first_a_highlight)
             for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]
         )
 
-        # Format team B stats
         team_b_text = "防守方: " + " | ".join(
             format_stat(team_b_stats[attr], attr, attr == first_b_highlight)
             for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]
@@ -528,16 +520,14 @@ class DuplicateCharacterDialog(QDialog):
         self.setWindowTitle("处理重复角色")
         self.duplicates = duplicates
         self.existing_chars = existing_chars
-        self.choices = {}  # Store user choices: {name: "overwrite" or "skip"}
+        self.choices = {}
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
 
-        # Instructions
         layout.addWidget(QLabel("以下角色名称已存在，请选择覆盖或跳过："))
 
-        # Table for duplicates
         self.table = QTableWidget()
         self.table.setRowCount(len(self.duplicates))
         self.table.setColumnCount(4)
@@ -548,12 +538,10 @@ class DuplicateCharacterDialog(QDialog):
             name = new_char["name"]
             existing_char = next((char for char in self.existing_chars if char["name"] == name), None)
 
-            # Name
             name_item = QTableWidgetItem(name)
-            name_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)  # Read-only
+            name_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
             self.table.setItem(row, 0, name_item)
 
-            # Existing data
             existing_data = (
                 f"昵称: {existing_char.get('nickname', '')}, 类型: {existing_char.get('type', '')}, "
                 f"爆裂: {existing_char.get('rank', '')}, "
@@ -562,10 +550,9 @@ class DuplicateCharacterDialog(QDialog):
                 f"4RL: {existing_char.get('4RL', 0.0)}"
             )
             existing_item = QTableWidgetItem(existing_data)
-            existing_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)  # Read-only
+            existing_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
             self.table.setItem(row, 1, existing_item)
 
-            # New data
             new_data = (
                 f"昵称: {new_char.get('nickname', '')}, 类型: {new_char.get('type', '')}, "
                 f"爆裂: {new_char.get('rank', '')}, "
@@ -574,20 +561,18 @@ class DuplicateCharacterDialog(QDialog):
                 f"4RL: {new_char.get('4RL', 0.0)}"
             )
             new_item = QTableWidgetItem(new_data)
-            new_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)  # Read-only
+            new_item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
             self.table.setItem(row, 2, new_item)
 
-            # Action combo box
             combo = QComboBox()
             combo.addItems(["覆盖", "跳过"])
-            combo.setCurrentText("跳过")  # Default to skip
+            combo.setCurrentText("跳过")
             combo.currentTextChanged.connect(lambda text, n=name: self.choices.update({n: text.lower()}))
-            self.choices[name] = "skip"  # Initialize default choice
+            self.choices[name] = "skip"
             self.table.setCellWidget(row, 3, combo)
 
         layout.addWidget(self.table)
 
-        # Select all options
         select_layout = QHBoxLayout()
         select_all_overwrite = QPushButton("全部覆盖")
         select_all_overwrite.setStyleSheet(BUTTON_STYLE["primary"])
@@ -599,7 +584,6 @@ class DuplicateCharacterDialog(QDialog):
         select_layout.addWidget(select_all_skip)
         layout.addLayout(select_layout)
 
-        # Buttons
         button_layout = QHBoxLayout()
         ok_btn = QPushButton("确定")
         ok_btn.setStyleSheet(BUTTON_STYLE["primary"])
@@ -734,7 +718,6 @@ class MatchViewer(QDialog):
         left_panel = QWidget()
         left_layout = QVBoxLayout()
 
-        # 初始化 search_group
         search_group = QGroupBox("搜索战绩")
         search_layout = QVBoxLayout()
         search_input_layout = QHBoxLayout()
@@ -753,7 +736,6 @@ class MatchViewer(QDialog):
         search_group.setLayout(search_layout)
         left_layout.addWidget(search_group)
 
-        # 初始化 drag_search_group
         drag_search_group = QGroupBox("拖放搜索")
         drag_search_layout = QVBoxLayout()
         team_b_search_layout = QHBoxLayout()
@@ -785,12 +767,10 @@ class MatchViewer(QDialog):
         drag_search_group.setLayout(drag_search_layout)
         left_layout.addWidget(drag_search_group)
 
-        # 初始化 match_list_widget
         self.match_list_widget = QListWidget()
         self.match_list_widget.setSelectionMode(QListWidget.ExtendedSelection)
         left_layout.addWidget(self.match_list_widget)
 
-        # 初始化按钮
         button_layout = QHBoxLayout()
         select_all_btn = QPushButton("全选")
         select_all_btn.setStyleSheet(BUTTON_STYLE["primary"])
@@ -909,7 +889,7 @@ class MatchViewer(QDialog):
         except json.JSONDecodeError:
             self.characters_data = []
         self.display_matches()
-        self.filter_characters()  # 加载角色列表
+        self.filter_characters()
 
     def display_matches(self, filtered_matches=None):
         self.match_list_widget.clear()
@@ -986,7 +966,6 @@ class MatchViewer(QDialog):
                 return name in team_a or name in team_b
             return False
 
-        # Split query into AND/OR parts
         terms = []
         current_term = ""
         i = 0
@@ -1006,7 +985,7 @@ class MatchViewer(QDialog):
             current_term += search_query[i]
             i += 1
         if current_term:
-            terms.append(("AND", current_term.strip()))  # Default to AND for last term
+            terms.append(("AND", current_term.strip()))
 
         for match in self.matches_data:
             and_conditions_met = True
@@ -1021,7 +1000,6 @@ class MatchViewer(QDialog):
                 elif op == "OR":
                     or_conditions_met = or_conditions_met or condition_met
 
-            # Match is valid if all AND conditions are met OR any OR condition is met
             if and_conditions_met or or_conditions_met:
                 found_matches.append(match)
 
@@ -1185,7 +1163,6 @@ class MatchViewer(QDialog):
         try:
             with open(CHAR_FILE, "w", encoding="utf-8") as f:
                 json.dump(self.characters_data, f, indent=2, ensure_ascii=False)
-            # Notify parent (CharacterManager) to reload characters
             if self.parent() and isinstance(self.parent(), CharacterManager):
                 self.parent().load_characters()
         except Exception as e:
@@ -1198,7 +1175,7 @@ class CharacterManager(QWidget):
         self.characters_data = []
         self.init_ui()
         self.load_characters()
-        self.update_match()  # 添加这行
+        self.update_match()
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
         else:
@@ -1214,7 +1191,6 @@ class CharacterManager(QWidget):
         left_panel = QWidget()
         left_layout = QVBoxLayout()
 
-        # 初始化 match_add_group
         match_add_group = QGroupBox("添加战绩")
         match_add_layout = QVBoxLayout()
         team_b_layout = QHBoxLayout()
@@ -1252,7 +1228,7 @@ class CharacterManager(QWidget):
         self.notes_input.setMinimumHeight(60)
         match_add_layout.addWidget(self.notes_input)
         match_btn_layout = QHBoxLayout()
-        self.add_match_btn = QPushButton("添加战绩")  # 确保定义
+        self.add_match_btn = QPushButton("添加战绩")
         self.add_match_btn.setStyleSheet(BUTTON_STYLE["primary"])
         self.clear_match_input_btn = QPushButton("清除输入")
         self.clear_match_input_btn.setStyleSheet(BUTTON_STYLE["secondary"])
@@ -1262,7 +1238,6 @@ class CharacterManager(QWidget):
         match_add_group.setLayout(match_add_layout)
         left_layout.addWidget(match_add_group)
 
-        # 初始化 latest_match_preview 和 view_matches_btn
         self.latest_match_preview = LatestMatchPreview()
         left_layout.addWidget(self.latest_match_preview)
         self.view_matches_btn = QPushButton("查看战绩")
@@ -1374,7 +1349,6 @@ class CharacterManager(QWidget):
 
         self.selected_img_path = None
 
-        # 信号连接
         self.select_img_btn.clicked.connect(self.select_image)
         self.add_char_btn.clicked.connect(self.add_character)
         self.clear_char_input_btn.clicked.connect(self.clear_character_input)
@@ -1419,7 +1393,6 @@ class CharacterManager(QWidget):
         if rank == "爆裂":
             rank = ""
 
-        # 处理 RL 值，空输入默认为 0.0
         rl_values = {}
         for rl_key, rl_input in [
             ("2RL", self.rl2_input),
@@ -1645,7 +1618,6 @@ class CharacterManager(QWidget):
             return
 
         try:
-            # Create a temporary CSV file with UTF-8-SIG encoding
             import tempfile
             with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8-sig', suffix='.csv',
                                              newline='') as csv_file:
@@ -1667,17 +1639,13 @@ class CharacterManager(QWidget):
                     })
                 csv_file_path = csv_file.name
 
-            # Create ZIP file
             with zipfile.ZipFile(file_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                # Add CSV file
                 zf.write(csv_file_path, "characters.csv")
-                # Add images
                 for char in export_data:
                     img_path = os.path.join(IMG_DIR, char["image"])
                     if os.path.exists(img_path):
                         zf.write(img_path, char["image"])
 
-            # Clean up temporary CSV file
             os.remove(csv_file_path)
 
             QMessageBox.information(self, "成功", f"成功导出 {len(selected_chars)} 个角色到 {file_path}")
@@ -1695,13 +1663,11 @@ class CharacterManager(QWidget):
             temp_dir = None
             csv_path = None
 
-            # Valid types, ranks, and extensions
             valid_types = {"火力型", "防御型", "辅助型", ""}
             valid_ranks = {"I", "II", "III", "Λ", ""}
             valid_extensions = {".png", ".jpg", ".jpeg"}
 
             if file_path.endswith('.zip'):
-                # Extract ZIP to temporary directory
                 temp_dir = tempfile.mkdtemp()
                 with zipfile.ZipFile(file_path, "r") as zf:
                     zf.extractall(temp_dir)
@@ -1711,7 +1677,6 @@ class CharacterManager(QWidget):
             else:
                 csv_path = file_path
 
-            # Read CSV file
             with open(csv_path, "r", encoding="utf-8-sig") as f:
                 reader = csv.DictReader(f)
                 if not reader.fieldnames or sorted(reader.fieldnames) != sorted(
@@ -1754,7 +1719,6 @@ class CharacterManager(QWidget):
                         invalid_data.append(f"{name}: 无效RL值")
                         continue
 
-                    # Find matching image file
                     img_path = None
                     for ext in valid_extensions:
                         candidate = os.path.join(csv_dir, f"{name}{ext}")
@@ -1786,7 +1750,6 @@ class CharacterManager(QWidget):
                     else:
                         import_data.append(char_data)
 
-                # Handle duplicates
                 overwrite_chars = []
                 if duplicates:
                     dialog = DuplicateCharacterDialog(duplicates, self.characters_data, self)
@@ -1810,34 +1773,28 @@ class CharacterManager(QWidget):
                         error_msg += f"\n无效数据: {', '.join(invalid_data)}"
                     raise ValueError(error_msg)
 
-                # Process images and update characters.json
                 with open(CHAR_FILE, "r+", encoding="utf-8") as f:
                     characters = json.load(f)
 
-                    # Handle overwrites: remove old character, update image
                     for overwrite_char in overwrite_chars:
                         old_char = next((char for char in characters if char["name"] == overwrite_char["name"]), None)
                         if old_char:
                             characters.remove(old_char)
-                            # Remove old image if different
                             if old_char["image"] != overwrite_char["image"]:
                                 old_img_path = os.path.join(IMG_DIR, old_char["image"])
                                 if os.path.exists(old_img_path):
                                     os.remove(old_img_path)
-                            # Copy new image
                             src_img_path = os.path.join(csv_dir, overwrite_char["image"])
                             dest_img_path = os.path.join(IMG_DIR, overwrite_char["image"])
                             shutil.copy2(src_img_path, dest_img_path)
                         characters.append(overwrite_char)
 
-                    # Handle new characters: copy image and append
                     for new_char in import_data:
                         src_img_path = os.path.join(csv_dir, new_char["image"])
                         dest_img_path = os.path.join(IMG_DIR, new_char["image"])
                         shutil.copy2(src_img_path, dest_img_path)
                         characters.append(new_char)
 
-                    # Save updated characters.json
                     f.seek(0)
                     json.dump(characters, f, indent=2, ensure_ascii=False)
                     f.truncate()
@@ -1855,7 +1812,6 @@ class CharacterManager(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"导入失败: {str(e)}")
         finally:
-            # Clean up temporary directory if used
             if temp_dir and os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1948,16 +1904,16 @@ class CharacterManager(QWidget):
         try:
             with open(MATCH_FILE, "r", encoding="utf-8") as f:
                 matches = json.load(f)
-            print(f"Loaded {len(matches)} matches from {MATCH_FILE}")  # 调试信息
+            print(f"Loaded {len(matches)} matches from {MATCH_FILE}")
             self.latest_match_preview.update_preview(matches)
         except json.JSONDecodeError as e:
-            print(f"JSON decode error in {MATCH_FILE}: {e}")  # 调试信息
+            print(f"JSON decode error in {MATCH_FILE}: {e}")
             self.latest_match_preview.update_preview([])
         except FileNotFoundError:
-            print(f"{MATCH_FILE} not found")  # 调试信息
+            print(f"{MATCH_FILE} not found")
             self.latest_match_preview.update_preview([])
         except Exception as e:
-            print(f"Error loading matches: {e}")  # 调试信息
+            print(f"Error loading matches: {e}")
             self.latest_match_preview.update_preview([])
 
 if __name__ == "__main__":
