@@ -202,6 +202,7 @@ class DropLabel(QLabel):
         if self.parent_widget and hasattr(self.parent_widget, 'update_team_stats'):
             self.parent_widget.update_team_stats()
 
+
 class EditCharacterDialog(QDialog):
     def __init__(self, char_data, parent=None):
         super().__init__(parent)
