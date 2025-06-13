@@ -83,7 +83,6 @@ def get_character_image_path(character_name):
         print(f"获取图片路径失败: {e}")
     return None
 
-
 class DraggableListWidget(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -201,6 +200,42 @@ class DropLabel(QLabel):
         self.character_name = None
         if self.parent_widget and hasattr(self.parent_widget, 'update_team_stats'):
             self.parent_widget.update_team_stats()
+
+class DroppableLineEdit(QLineEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)  # 启用拖放支持
+        self.setStyleSheet("""
+            QLineEdit {
+                font-family: Arial, sans-serif;
+                font-size: 12px;
+                padding: 5px;
+                min-width: 200px;
+            }
+        """)
+
+    def dragEnterEvent(self, event):
+        # 接受包含文本的拖放操作
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        # 处理拖放事件，追加角色名称并确保空格分隔
+        if event.mimeData().hasText():
+            char_name = event.mimeData().text().strip()  # 清理首尾空格
+            current_text = self.text().strip()  # 获取当前文本并清理
+            if current_text:
+                # 如果已有文本，追加空格和新名称
+                new_text = f"{current_text} {char_name}"
+            else:
+                # 没有文本，直接设置新名称
+                new_text = char_name
+            self.setText(new_text)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
 class EditCharacterDialog(QDialog):
     def __init__(self, char_data, parent=None):
@@ -721,8 +756,8 @@ class MatchViewer(QDialog):
         search_group = QGroupBox("搜索战绩")
         search_layout = QVBoxLayout()
         search_input_layout = QHBoxLayout()
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("输入搜索内容（例：a:角色1 AND d:角色2 OR n:备注内容）")  # 更新占位符
+        self.search_input = DroppableLineEdit()
+        self.search_input.setPlaceholderText("输入搜索内容角色名（a:进攻 d:防守 n:备注 空格为AND）")
         search_input_layout.addWidget(self.search_input)
         search_btn = QPushButton("搜索")
         search_btn.setStyleSheet(BUTTON_STYLE["primary"])
@@ -905,9 +940,17 @@ class MatchViewer(QDialog):
     def display_matches(self, filtered_matches=None):
         self.match_list_widget.clear()
         matches_to_display = filtered_matches if filtered_matches is not None else self.matches_data
-        for index, match in enumerate(matches_to_display):
+        for index, match in enumerate(self.matches_data):
+            if filtered_matches is not None:
+                if match not in filtered_matches:
+                    continue
+            else:
+                # When not filtered, use the original index
+                original_index = index
+            # When filtered, find the original index in matches_data
+            original_index = self.matches_data.index(match) if filtered_matches is not None else index
             item = QListWidgetItem(self.match_list_widget)
-            custom_widget = MatchListItem(match, index)
+            custom_widget = MatchListItem(match, original_index)
             item.setSizeHint(custom_widget.sizeHint())
             self.match_list_widget.addItem(item)
             self.match_list_widget.setItemWidget(item, custom_widget)
@@ -935,7 +978,10 @@ class MatchViewer(QDialog):
             try:
                 with open(MATCH_FILE, "r+", encoding="utf-8") as f:
                     matches = json.load(f)
-                    matches[data_index] = updated_data
+                    if 0 <= data_index < len(matches):
+                        matches[data_index] = updated_data
+                    else:
+                        raise IndexError("Invalid match index")
                     f.seek(0)
                     json.dump(matches, f, indent=2, ensure_ascii=False)
                     f.truncate()
@@ -979,44 +1025,18 @@ class MatchViewer(QDialog):
             elif team == "notes":
                 return value in notes
             elif team == "any":
-                return value in team_a or value in team_b or value in notes  # 更新：any 也包括备注
+                return value in team_a or value in team_b or value in notes
             return False
 
-        terms = []
-        current_term = ""
-        i = 0
-        while i < len(search_query):
-            if search_query[i:i + 3].lower() == "and":
-                if current_term:
-                    terms.append(("AND", current_term.strip()))
-                    current_term = ""
-                i += 3
-                continue
-            elif search_query[i:i + 2].lower() == "or":
-                if current_term:
-                    terms.append(("OR", current_term.strip()))
-                    current_term = ""
-                i += 2
-                continue
-            current_term += search_query[i]
-            i += 1
-        if current_term:
-            terms.append(("AND", current_term.strip()))
-
+        terms = [t for t in search_query.split() if t]
         for match in self.matches_data:
-            and_conditions_met = True
-            or_conditions_met = False
-
-            for i, (op, term) in enumerate(terms):
+            all_conditions_met = True
+            for term in terms:
                 team, value = resolve_term(term)
-                condition_met = match_condition(team, value, match)
-
-                if op == "AND":
-                    and_conditions_met = and_conditions_met and condition_met
-                elif op == "OR":
-                    or_conditions_met = or_conditions_met or condition_met
-
-            if and_conditions_met or or_conditions_met:
+                if not match_condition(team, value, match):
+                    all_conditions_met = False
+                    break
+            if all_conditions_met:
                 found_matches.append(match)
 
         if not found_matches:
@@ -1025,6 +1045,7 @@ class MatchViewer(QDialog):
             self.display_matches(found_matches)
 
     def search_by_drag(self):
+
         try:
             team_a = [label.character_name for label in self.team_a_search_labels if label.character_name]
             team_b = [label.character_name for label in self.team_b_search_labels if label.character_name]
@@ -1036,7 +1057,7 @@ class MatchViewer(QDialog):
                 query_parts.append(f"a:{char}")
             for char in team_b:
                 query_parts.append(f"d:{char}")
-            search_query = " AND ".join(query_parts)
+            search_query = " ".join(query_parts)
             self.search_input.setText(search_query)
             self.search_matches()
         except Exception as e:
@@ -1374,23 +1395,18 @@ class CharacterManager(QWidget):
         self.clear_match_input_btn.clicked.connect(self.clear_match_input)
         self.view_matches_btn.clicked.connect(self.show_match_viewer)
 
-    def select_all_chars(self):
-        if self.list_widget.count() > 1000:
-            reply = QMessageBox.question(
-                self, "警告",
-                f"角色列表包含 {self.list_widget.count()} 个项目，全选可能导致性能问题。是否继续？",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            if reply == QMessageBox.No:
-                return
-        self.list_widget.blockSignals(True)
-        try:
-            for i in range(self.list_widget.count()):
-                item = self.list_widget.item(i)
-                if item is not None:
-                    item.setSelected(True)
-        finally:
-            self.list_widget.blockSignals(False)
+    def clear_character_input(self):
+        self.name_input.clear()
+        self.nickname_input.clear()
+        self.preview_label.clear()
+        self.selected_img_path = None
+        self.type_combo.setCurrentIndex(0)
+        self.rank_combo.setCurrentIndex(0)
+        self.rl2_input.setText("0")
+        self.rl25_input.setText("0")
+        self.rl3_input.setText("0")
+        self.rl35_input.setText("0")
+        self.rl4_input.setText("0")
 
     def select_image(self):
         path, _ = QFileDialog.getOpenFileName(self, "选择图片", "", "Images (*.png *.jpg *.jpeg)")
@@ -1472,60 +1488,6 @@ class CharacterManager(QWidget):
         self.load_characters()
         QMessageBox.information(self, "成功", f"角色 [{name}] 添加成功")
 
-    def clear_character_input(self):
-        self.name_input.clear()
-        self.nickname_input.clear()
-        self.preview_label.clear()
-        self.selected_img_path = None
-        self.type_combo.setCurrentIndex(0)
-        self.rank_combo.setCurrentIndex(0)
-        self.rl2_input.setText("0")
-        self.rl25_input.setText("0")
-        self.rl3_input.setText("0")
-        self.rl35_input.setText("0")
-        self.rl4_input.setText("0")
-
-    def edit_character(self):
-        selected_items = self.list_widget.selectedItems()
-        if not selected_items:
-            QMessageBox.information(self, "提示", "请先选择一个角色进行编辑")
-            return
-        if len(selected_items) > 1:
-            QMessageBox.information(self, "提示", "一次只能编辑一个角色")
-            return
-
-        char_name = selected_items[0].data(Qt.UserRole)
-        char_data = next((char for char in self.characters_data if char["name"] == char_name), None)
-        if not char_data:
-            QMessageBox.critical(self, "错误", "无法获取角色数据")
-            return
-
-        dialog = EditCharacterDialog(char_data, self)
-        if dialog.exec_():
-            updated_data = dialog.updated_data
-            try:
-                with open(CHAR_FILE, "r+", encoding="utf-8") as f:
-                    characters = json.load(f)
-                    for i, char in enumerate(characters):
-                        if char["name"] == char_data["name"]:
-                            characters[i] = updated_data
-                            break
-                    f.seek(0)
-                    json.dump(characters, f, indent=2, ensure_ascii=False)
-                    f.truncate()
-                self.load_characters()
-                QMessageBox.information(self, "成功", f"角色 [{updated_data['name']}] 已更新")
-            except Exception as e:
-                QMessageBox.critical(self, "错误", f"更新角色失败: {e}")
-
-    def load_characters(self):
-        try:
-            with open(CHAR_FILE, "r", encoding="utf-8") as f:
-                self.characters_data = json.load(f)
-        except json.JSONDecodeError:
-            self.characters_data = []
-        self.filter_characters()
-
     def filter_characters(self):
         self.list_widget.clear()
         selected_type = self.filter_type_combo.currentText()
@@ -1575,23 +1537,56 @@ class CharacterManager(QWidget):
             item.setSizeHint(QSize(60, 80))
             self.list_widget.addItem(item)
 
-    def update_character_order(self):
-        new_order = []
-        for i in range(self.list_widget.count()):
-            item = self.list_widget.item(i)
-            name = item.data(Qt.UserRole)
-            for char in self.characters_data:
-                if char["name"] == name:
-                    new_order.append(char)
-                    break
-        self.characters_data = new_order
+    def select_all_chars(self):
+        if self.list_widget.count() > 1000:
+            reply = QMessageBox.question(
+                self, "警告",
+                f"角色列表包含 {self.list_widget.count()} 个项目，全选可能导致性能问题。是否继续？",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.No:
+                return
+        self.list_widget.blockSignals(True)
         try:
-            with open(CHAR_FILE, "r+", encoding="utf-8") as f:
-                f.seek(0)
-                json.dump(self.characters_data, f, indent=2, ensure_ascii=False)
-                f.truncate()
-        except Exception as e:
-            QMessageBox.critical(self, "错误", f"保存角色顺序失败: {e}")
+            for i in range(self.list_widget.count()):
+                item = self.list_widget.item(i)
+                if item is not None:
+                    item.setSelected(True)
+        finally:
+            self.list_widget.blockSignals(False)
+
+    def edit_character(self):
+        selected_items = self.list_widget.selectedItems()
+        if not selected_items:
+            QMessageBox.information(self, "提示", "请先选择一个角色进行编辑")
+            return
+        if len(selected_items) > 1:
+            QMessageBox.information(self, "提示", "一次只能编辑一个角色")
+            return
+
+        char_name = selected_items[0].data(Qt.UserRole)
+        char_data = next((char for char in self.characters_data if char["name"] == char_name), None)
+        if not char_data:
+            QMessageBox.critical(self, "错误", "无法获取角色数据")
+            return
+
+        dialog = EditCharacterDialog(char_data, self)
+        if dialog.exec_():
+            updated_data = dialog.updated_data
+            try:
+                with open(CHAR_FILE, "r+", encoding="utf-8") as f:
+                    characters = json.load(f)
+                    for i, char in enumerate(characters):
+                        if char["name"] == char_data["name"]:
+                            characters[i] = updated_data
+                            break
+                    f.seek(0)
+                    json.dump(characters, f, indent=2, ensure_ascii=False)
+                    f.truncate()
+                self.load_characters()
+                QMessageBox.information(self, "成功", f"角色 [{updated_data['name']}] 已更新")
+            except Exception as e:
+                QMessageBox.critical(self, "错误", f"更新角色失败: {e}")
 
     def delete_character(self):
         selected_items = self.list_widget.selectedItems()
@@ -1837,53 +1832,13 @@ class CharacterManager(QWidget):
             if temp_dir and os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def get_team(self, labels):
-        return [label.character_name for label in labels if label.character_name]
-
-    def update_team_stats(self):
-        def calculate_team_stats(labels):
-            stats = {"2RL": 0, "2.5RL": 0, "3RL": 0, "3.5RL": 0, "4RL": 0}
-            for label in labels:
-                if label.character_name:
-                    for char in self.characters_data:
-                        if char["name"] == label.character_name:
-                            for attr in stats:
-                                stats[attr] += float(char.get(attr, 0))
-            return stats
-
-        def format_stat(value, stat_name, is_first_highlight):
-            formatted_value = f"{value:.1f}"
-            if is_first_highlight:
-                return f"<span style='color: red; font-weight: bold;'>{stat_name}: {formatted_value}</span>"
-            return f"{stat_name}: {formatted_value}"
-
-        team_a_stats = calculate_team_stats(self.team_a_labels)
-        team_b_stats = calculate_team_stats(self.team_b_labels)
-
-        first_a_highlight = None
-        for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]:
-            if team_a_stats[attr] >= 100:
-                first_a_highlight = attr
-                break
-
-        first_b_highlight = None
-        for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]:
-            if team_b_stats[attr] >= 100:
-                first_b_highlight = attr
-                break
-
-        team_a_text = "进攻方: " + " | ".join(
-            format_stat(team_a_stats[attr], attr, attr == first_a_highlight)
-            for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]
-        )
-
-        team_b_text = "防守方: " + " | ".join(
-            format_stat(team_b_stats[attr], attr, attr == first_b_highlight)
-            for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]
-        )
-
-        self.team_a_stats.setText(team_a_text)
-        self.team_b_stats.setText(team_b_text)
+    def load_characters(self):
+        try:
+            with open(CHAR_FILE, "r", encoding="utf-8") as f:
+                self.characters_data = json.load(f)
+        except json.JSONDecodeError:
+            self.characters_data = []
+        self.filter_characters()
 
     def add_match(self):
         team_a = self.get_team(self.team_a_labels)
@@ -1937,20 +1892,85 @@ class CharacterManager(QWidget):
         viewer = MatchViewer(self)
         viewer.exec_()
 
+    def update_character_order(self):
+        new_order = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            name = item.data(Qt.UserRole)
+            for char in self.characters_data:
+                if char["name"] == name:
+                    new_order.append(char)
+                    break
+        self.characters_data = new_order
+        try:
+            with open(CHAR_FILE, "r+", encoding="utf-8") as f:
+                f.seek(0)
+                json.dump(self.characters_data, f, indent=2, ensure_ascii=False)
+                f.truncate()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存角色顺序失败: {e}")
+
+    def get_team(self, labels):
+        return [label.character_name for label in labels if label.character_name]
+
+    def update_team_stats(self):
+        def calculate_team_stats(labels):
+            stats = {"2RL": 0, "2.5RL": 0, "3RL": 0, "3.5RL": 0, "4RL": 0}
+            for label in labels:
+                if label.character_name:
+                    for char in self.characters_data:
+                        if char["name"] == label.character_name:
+                            for attr in stats:
+                                stats[attr] += float(char.get(attr, 0))
+            return stats
+
+        def format_stat(value, stat_name, is_first_highlight):
+            formatted_value = f"{value:.1f}"
+            if is_first_highlight:
+                return f"<span style='color: red; font-weight: bold;'>{stat_name}: {formatted_value}</span>"
+            return f"{stat_name}: {formatted_value}"
+
+        team_a_stats = calculate_team_stats(self.team_a_labels)
+        team_b_stats = calculate_team_stats(self.team_b_labels)
+
+        first_a_highlight = None
+        for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]:
+            if team_a_stats[attr] >= 100:
+                first_a_highlight = attr
+                break
+
+        first_b_highlight = None
+        for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]:
+            if team_b_stats[attr] >= 100:
+                first_b_highlight = attr
+                break
+
+        team_a_text = "进攻方: " + " | ".join(
+            format_stat(team_a_stats[attr], attr, attr == first_a_highlight)
+            for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]
+        )
+
+        team_b_text = "防守方: " + " | ".join(
+            format_stat(team_b_stats[attr], attr, attr == first_b_highlight)
+            for attr in ["2RL", "2.5RL", "3RL", "3.5RL", "4RL"]
+        )
+
+        self.team_a_stats.setText(team_a_text)
+        self.team_b_stats.setText(team_b_text)
+
     def update_match(self):
         try:
             with open(MATCH_FILE, "r", encoding="utf-8") as f:
                 matches = json.load(f)
-            print(f"Loaded {len(matches)} matches from {MATCH_FILE}")
             self.latest_match_preview.update_preview(matches)
         except json.JSONDecodeError as e:
-            print(f"JSON decode error in {MATCH_FILE}: {e}")
+            print(f"JSON解码错误，文件：{MATCH_FILE}: {e}")
             self.latest_match_preview.update_preview([])
         except FileNotFoundError:
-            print(f"{MATCH_FILE} not found")
+            print(f"文件未找到：{MATCH_FILE}")
             self.latest_match_preview.update_preview([])
         except Exception as e:
-            print(f"Error loading matches: {e}")
+            print(f"加载比赛时发生错误: {e}")
             self.latest_match_preview.update_preview([])
 
 if __name__ == "__main__":
